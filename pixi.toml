@@ -1,0 +1,20 @@
+[project]
+name = "songmoodpredictor"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[dependencies]
+python = "3.11.*"
+pandas = "*"
+numpy = "*"
+scikit-learn = ">=1.7.0,<2"
+matplotlib = "*"
+networkx = "*"
+jupyterlab = "*"
+streamlit = "*"
+pytorch = "*"
+torchvision = "*"
+pip = "*"
+
+[pypi-dependencies]
+torch-geometric = "*"

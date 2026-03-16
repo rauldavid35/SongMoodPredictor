@@ -1,0 +1,1 @@
+SongMoodPredictor is a machine learning project designed to predict the mood of songs based on their audio features and structural similarity to other songs. It combines audio feature analysis, graph construction using NetworkX, machine learning for classification, and a simple front-end interface for real-time interaction.

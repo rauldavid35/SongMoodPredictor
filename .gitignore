@@ -1,0 +1,29 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+msd_env/
+venv/
+.venv/
+
+# Environment / pixi
+.pixi/
+*.toml.lock
+
+# VS Code settings
+.vscode/
+
+# Environment variables
+.env
+.env.*
+
+# Ignore only raw data
+data/raw/
+
+# OS-specific
+.DS_Store
+Thumbs.db
