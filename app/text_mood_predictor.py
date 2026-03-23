@@ -176,4 +176,4 @@ def classify_long_text(text, model, tokenizer, max_chunk_tokens=64):
 
     best_label = max(averaged, key=averaged.get)
 
-    return {"label": best_label, "score": averaged[best_label]}
+    return {"label": best_label, "score": averaged[best_label], "all_scores": averaged}

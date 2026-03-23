@@ -27,12 +27,54 @@ import yt_dlp
 import subprocess
 import datetime
 import sys
+import csv
 
 #from text_mood_predictor import search_genius_lyrics,scrape_genius_lyrics,classify_long_text,load_emotion_model,load_whisper_model,delete_file,download_audio_youtube,transcribe_whisper,record_microphone,delete_microphone_file
-from audio_functions import delete_file,download_audio_youtube,transcribe_whisper,record_microphone,delete_microphone_file
+from audio_functions import delete_file,download_audio_youtube,transcribe_whisper,record_microphone,delete_microphone_file,get_video_urls
 from cache_model_loading import load_emotion_model,load_whisper_model
 from chunk_classification import classify_long_text
 from lyrics_scraping_functions import search_genius_lyrics,scrape_genius_lyrics
+
+
+DB_FILE = "my_songs_db.csv"
+
+def save_song_to_db(title, url, scores_dict):
+    """Salvează titlul, scorurile emoțiilor și URL-ul la final într-un CSV, evitând duplicatele."""
+    
+    # 1. Verificăm dacă melodia există deja în fișier
+    if os.path.isfile(DB_FILE):
+        try:
+            # Citim fișierul CSV existent
+            df = pd.read_csv(DB_FILE)
+            # Dacă titlul se află deja în coloana 'Title', oprim funcția
+            if title in df['Title'].values:
+                return False  # Returnăm False ca să știm că era deja acolo
+        except Exception:
+            pass # Dacă fișierul e corupt sau gol, ignorăm și trecem la salvare
+            
+    # 2. Dacă a trecut de verificarea de mai sus, înseamnă că e o melodie nouă. O salvăm!
+    file_exists = os.path.isfile(DB_FILE)
+    fieldnames = ['Title', 'anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise', 'URL']
+    
+    with open(DB_FILE, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        if not file_exists:
+            writer.writeheader()
+            
+        row = {
+            'Title': title,
+            'anger': scores_dict.get('anger', 0.0),
+            'disgust': scores_dict.get('disgust', 0.0),
+            'fear': scores_dict.get('fear', 0.0),
+            'joy': scores_dict.get('joy', 0.0),
+            'neutral': scores_dict.get('neutral', 0.0),
+            'sadness': scores_dict.get('sadness', 0.0),
+            'surprise': scores_dict.get('surprise', 0.0),
+            'URL': url # Salvăm link-ul aici
+        }
+        writer.writerow(row)
+        return True  # Returnăm True pentru a confirma că a fost salvată
 
 # Load models and tokenizer
 whisper_model = load_whisper_model()
@@ -44,49 +86,153 @@ mode = st.radio("Select input:", ["YouTube URL", "🎤 Microphone"])
 
 # After processing the song
 if mode == "YouTube URL":
-    url = st.text_input("Enter YouTube link")
-    if url and st.button("Analyze Song"):
-        with st.spinner("Downloading and processing audio..."):
-            mp3_file, title = download_audio_youtube(url)
-            st.write(f"Detected Title: **{title}**")
-
-            lyrics = search_genius_lyrics(title)
-            if lyrics:
-                st.success("✅ Lyrics fetched from Genius")
+    url = st.text_input("Enter YouTube link (Video or Playlist)")
+    if url and st.button("Analyze"):
+        
+        with st.spinner("Căutăm videoclipurile..."):
+            video_urls = get_video_urls(url) # Apelăm noua funcție
+            
+        st.success(f"🔗 S-au găsit {len(video_urls)} melodii de procesat!")
+        progress_bar = st.progress(0) # Inițializăm bara de progres
+        
+        # --- 1. INIȚIALIZĂM LISTELE PENTRU SESIUNEA CURENTĂ ---
+        session_scores_list = []
+        session_titles_list = []
+        
+        # Un mesaj temporar vizibil ca utilizatorul să știe că se lucrează
+        status_text = st.empty()
+        
+        # --- 2. ASCUNDEM TOT PROCESUL TEHNIC ÎNTR-UN EXPANDER ---
+        with st.expander("⚙️ Apasă aici pentru a vedea detaliile analizei (Versuri, Chunk-uri, Log-uri)", expanded=False):
+            
+            for i, vid_url in enumerate(video_urls):
+                # Actualizăm textul vizibil din afara expander-ului
+                status_text.info(f"⏳ Se analizează melodia {i+1} din {len(video_urls)}... Te rugăm să aștepți.")
+                
+                st.markdown("---")
+                st.write(f"### 🔄 Detalii Melodia {i+1}")
+                
                 try:
-                    lang = detect(lyrics[:300])
-                    st.info(f"Detected language: {lang}")
-                except:
-                    st.warning("Could not detect language.")
-            else:
-                st.warning("Lyrics not found — transcribing audio instead...")
-                lyrics = transcribe_whisper(mp3_file)  # Use MP3 file for transcription
+                    mp3_file, title = download_audio_youtube(vid_url)
+                    st.write(f"Detected Title: **{title}**")
 
-            st.subheader("Lyrics/Text")
-            st.text_area("Lyrics/Text", value=lyrics or "— No lyrics/text —", height=300)
+                    lyrics = search_genius_lyrics(title)
+                    if lyrics:
+                        st.success("✅ Lyrics fetched from Genius")
+                        try:
+                            lang = detect(lyrics[:300])
+                            st.info(f"Detected language: {lang}")
+                        except:
+                            st.warning("Could not detect language.")
+                    else:
+                        st.warning("Lyrics not found — transcribing audio instead...")
+                        lyrics = transcribe_whisper(mp3_file)
 
-            if not lyrics or len(lyrics.strip()) < 30:
-                st.warning("Lyrics are too short to analyze.")
-                st.stop()
+                    with st.expander("Vezi Versurile / Textul transris"):
+                        st.text_area(f"Lyrics/Text ({title})", value=lyrics or "— No lyrics/text —", height=150)
 
-            result = classify_long_text(lyrics, model, tokenizer)
-            if result:
-                label = result['label']
-                score = result['score']
-                st.subheader("Predicted Mood")
-                st.success(label.capitalize())
-                st.info(f"Confidence: {score:.2%}")
-            else:
-                st.warning("Could not determine mood.")
+                    if not lyrics or len(lyrics.strip()) < 30:
+                        st.warning(f"Versurile sunt prea scurte pentru {title}. Trecem peste.")
+                        delete_file(mp3_file)
+                        continue 
 
-            # Provide download options for MP3
-            st.download_button("⬇️ Download MP3", data=open(mp3_file, 'rb').read(), file_name=mp3_file, mime="audio/mp3")
+                    result = classify_long_text(lyrics, model, tokenizer)
+                    if result:
+                        label = result['label']
+                        score = result['score']
+                        all_scores = result.get('all_scores', {})
+                        
+                        st.success(f"**Predicted Mood:** {label.capitalize()} (Confidence: {score:.2%})")
+                        
+                        if all_scores:
+                            # --- SALVĂM DATELE ÎN LISTELE TEMPORARE ---
+                            session_scores_list.append(all_scores)
+                            session_titles_list.append(title)
 
-            # Cleanup after the download is done
-            delete_file(mp3_file)
+                            is_new = save_song_to_db(title, vid_url, all_scores)
+                            if is_new:
+                                st.info(f"💾 Salvat în baza de date!")
+                            else:
+                                st.warning(f"⚠️ Melodia se afla deja în baza de date. Am sărit peste salvare.")
+                    else:
+                        st.warning(f"Could not determine mood for {title}.")
 
-        # Clean up memory by invoking garbage collection
-        gc.collect()  # Attempt to free up memory
+                    # Cleanup după fiecare melodie
+                    delete_file(mp3_file)
+                    gc.collect() 
+                    
+                except Exception as e:
+                    st.error(f"Eroare la procesarea melodiei {vid_url}: {e}")
+            
+                # Actualizăm bara de progres la finalul fiecărei iterații
+                progress_bar.progress((i + 1) / len(video_urls))
+
+        # Când bucla se termină, ștergem mesajul "Se analizează..." pentru un aspect curat
+        status_text.empty()
+        
+        st.balloons()
+        st.success("🎉 Analiza s-a terminat cu succes!")
+
+        # --- 3. AICI ÎNCEPE SISTEMUL EXPERT DE RECOMANDĂRI ---
+        from sklearn.metrics.pairwise import cosine_similarity
+        
+        if len(session_scores_list) > 0:
+            st.markdown("---")
+            st.header("🧠 Sistem Expert: Recomandările tale")
+            st.write("Iată ce melodii din baza de date se potrivesc cu vibe-ul cerut (excluzând melodiile pe care tocmai le-ai introdus):")
+
+            # Definim emoțiile pentru a extrage exact coloanele care ne interesează
+            emotion_cols = ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
+
+            # Calculăm vibe-ul mediu al input-ului (ce a cerut utilizatorul acum)
+            session_df = pd.DataFrame(session_scores_list)
+            for col in emotion_cols:
+                if col not in session_df.columns:
+                    session_df[col] = 0.0
+                    
+            avg_vector = session_df[emotion_cols].mean().values.reshape(1, -1)
+
+            # Afișăm graficul vibe-ului țintă
+            st.subheader("📊 Profilul emoțional analizat (Ținta):")
+            st.bar_chart(pd.DataFrame(avg_vector, columns=emotion_cols).T)
+
+            # Căutăm recomandări în baza de date
+            try:
+                # Citim baza de date ACTUALIZATĂ
+                db_df = pd.read_csv(DB_FILE)
+                
+                # Eliminăm din opțiunile de recomandare orice titlu a fost introdus ca input!
+                candidates = db_df[~db_df['Title'].isin(session_titles_list)].copy()
+
+                if len(candidates) >= 3:
+                    # Calculăm Cosine Similarity între media input-ului și restul bazei de date
+                    candidate_vectors = candidates[emotion_cols].values
+                    similarities = cosine_similarity(avg_vector, candidate_vectors)[0]
+
+                    # Adăugăm scorurile, sortăm și extragem Top 3
+                    candidates['Similarity'] = similarities
+                    top_recommendations = candidates.sort_values(by='Similarity', ascending=False).head(3)
+
+                    st.subheader("✨ Top 3 Recomandări:")
+                    for idx, row in top_recommendations.iterrows(): 
+                        match_percentage = row['Similarity'] * 100
+                        st.success(f"**{row['Title']}** (Compatibilitate: {match_percentage:.1f}%)")
+                        
+                        # VERIFICĂM DACĂ AVEM URL-UL ȘI AFIȘĂM CLIPUL YOUTUBE DIRECT
+                        if 'URL' in candidates.columns and pd.notna(row['URL']) and str(row['URL']).strip() != "":
+                            st.video(row['URL'])
+                        else:
+                            # Fallback pentru melodiile unde nu ai completat link-ul
+                            search_query = str(row['Title']).replace(' ', '+')
+                            st.markdown(f"[▶️ Click aici pentru a căuta '{row['Title']}' pe YouTube](https://www.youtube.com/results?search_query={search_query})")
+                        
+                        # Un mic grafic pentru a demonstra *de ce* a fost recomandată
+                        with st.expander("Vezi detaliile emoționale ale recomandării"):
+                            st.bar_chart(row[emotion_cols].to_frame().T)
+                else:
+                    st.warning("Nu există suficiente melodii diferite în baza de date pentru a face 3 recomandări. Mai analizează câteva piese noi!")
+            except Exception as e:
+                st.error(f"Eroare la generarea recomandărilor: {e}")
 
 # After processing the microphone recording
 elif mode == "🎤 Microphone":

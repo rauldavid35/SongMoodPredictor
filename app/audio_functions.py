@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import matplotlib.colors as mcolors
+from urllib.parse import urlparse, parse_qs
 from cache_model_loading import load_emotion_model,load_whisper_model
 
 # ---------- AUDIO FUNCTIONS ----------
@@ -25,6 +26,30 @@ from cache_model_loading import load_emotion_model,load_whisper_model
 # Load models and tokenizer
 whisper_model = load_whisper_model()
 model, tokenizer = load_emotion_model()
+
+def get_video_urls(url):
+    """Extrage o listă de link-uri dintr-un playlist sau returnează link-ul simplu."""
+    
+    # 1. Verificăm dacă link-ul conține un playlist
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+    
+    if 'list' in query_params:
+        # Dacă da, extragem ID-ul playlist-ului și forțăm formatul de playlist
+        playlist_id = query_params['list'][0]
+        url = f"https://www.youtube.com/playlist?list={playlist_id}"
+
+    # 2. Extragem datele cu yt-dlp
+    ydl_opts = {'extract_flat': True, 'quiet': True}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        
+        if 'entries' in info:
+            # Este un playlist
+            return [f"https://www.youtube.com/watch?v={entry['id']}" for entry in info['entries'] if entry.get('id')]
+        else:
+            # Este un singur video
+            return [url]
 
 # Path to FFMPEG
 FFMPEG_PATH = "C:\\ffmpeg\\bin\\ffmpeg.exe"

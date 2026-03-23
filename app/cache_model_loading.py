@@ -23,7 +23,7 @@ import matplotlib.colors as mcolors
 # Cache the model loading
 @st.cache_resource
 def load_whisper_model():
-    return whisper.load_model("base")
+    return whisper.load_model("small")
 
 @st.cache_resource
 def load_emotion_model():
